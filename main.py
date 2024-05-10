@@ -3,18 +3,24 @@ import urllib.parse
 import json
 import pandas as pd
 import dotenv
+import os
 
 from datetime import datetime, timedelta
 from flask import Flask, redirect, request, jsonify, session
 
 app = Flask(__name__)
 app.secret_key = 'a123-b234-c456'
-CLIENT_ID = os.get_env('CLIENT_ID')
-CLIENT_SECRET = os.get_env('CLIENT_SECRET')
+CLIENT_ID = os.getenv('CLIENT_ID')
+CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 REDIRECT_URI = 'http://localhost:5000/callback'
 AUTH_URL = 'https://accounts.spotify.com/authorize'
 TOKEN_URL = 'https://accounts.spotify.com/api/token'
 API_BASE_URL = 'https://api.spotify.com/v1/'
+
+def get_headers():
+    return {
+        'Authorization': f"Bearer {session['access_token']}"
+    }
 
 def check_token():
     if 'access_token' not in session:  # If we dont have token, redirect to login
@@ -25,8 +31,9 @@ def check_token():
     
     return
 
-def get_all_songs(offset, limit, headers, params, first_time=True, total_tracks=999999999):
+def get_all_tracks(offset, limit, params, first_time=True, total_tracks=999999999):
     tracks = []
+    headers = get_headers()
     while offset <= total_tracks:
         response = requests.get(API_BASE_URL + 'me/tracks', headers=headers, params=params)
         response_data = response.json()
@@ -61,6 +68,22 @@ def get_track_atributes(items):
     flat_file['track_id'] = track['id']
 
     return flat_file
+
+def get_track_genre(album_id, artists_id):
+    app.logger.info(artists_id)
+    app.logger.info(album_id)
+    headers = get_headers()
+    response = requests.get(API_BASE_URL + f'albums/{album_id}', headers=headers)
+    response_data = response.json()
+    genres = response_data['genres']
+    if not genres:
+        for artist_id in artists_id:
+            response = requests.get(API_BASE_URL + f'artists/{artist_id}', headers=headers)
+            response_data = response.json()
+            genres = genres + response_data['genres']
+    return genres
+
+
 # Home Page
 @app.route('/')
 def index():
@@ -119,9 +142,7 @@ def options_menu():
 def get_playlists():
     check_token()
 
-    headers = {
-        'Authorization': f"Bearer {session['access_token']}"
-    }
+    headers = get_headers()
 
 
     response = requests.get(API_BASE_URL + 'me/playlists', headers=headers)
@@ -154,10 +175,6 @@ def refresh_token():
 @app.route('/liked-songs')
 def get_liked_songs():
     check_token()
-    
-    headers = {
-        'Authorization': f"Bearer {session['access_token']}"
-    }
 
     offset = 4000
     limit = 50
@@ -166,13 +183,20 @@ def get_liked_songs():
         'offset': offset
     }
 
-    tracks_info = get_all_songs(offset, limit, headers, params)
+    tracks_data = get_all_tracks(offset, limit, params)
     #with open('songs.json', 'w') as f:
         #json.dump(response_data, f)
     
-    songs_data = pd.DataFrame(tracks_info)
+    songs_data = pd.DataFrame(tracks_data)
     songs_data.to_csv('data.csv', index=False)
-    return 'SUCCESS'
+    songs_data['genres'] = songs_data.apply(lambda row: get_track_genre(row['album_id'], row['artists_id']), axis=1)
+    #genres = get_track_genre(album_id, artists_id)
+    songs_data.to_csv('data.csv', index=False)
+
+    tracks_genre = songs_data[['track_id', 'genres']]
+    tracks_genre = tracks_genre.explode('genres')
+    tracks_genre.to_csv('tracks_genre.csv', index=False)
+    return 'success'
 
     
 if __name__ == '__main__':

@@ -1,6 +1,5 @@
 .env
 .cache
-.json
 /env
-songs.json
-data.csv
+*.json
+*.csv
