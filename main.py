@@ -7,7 +7,6 @@ import os
 
 from datetime import datetime, timedelta
 from flask import Flask, redirect, request, jsonify, session
-from flask_sqlalchemy import SQLAlchemy
 
 # App Configurations
 app = Flask(__name__)
@@ -20,19 +19,6 @@ REDIRECT_URI = 'http://localhost:5000/callback'
 AUTH_URL = 'https://accounts.spotify.com/authorize'
 TOKEN_URL = 'https://accounts.spotify.com/api/token'
 API_BASE_URL = 'https://api.spotify.com/v1/'
-
-# DB Configurations
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
-from db_models import albumGenres
-
-db.create_all()
-
-# Temporal Cache Dictionaries
-album_genre_cache = {}
-artist_genre_cache = {}
 
 # API Functions
 # Function to get the request headers(Authorization Token)
@@ -71,6 +57,27 @@ def get_all_tracks(offset, limit, params, first_time=True, total_tracks=99999999
         app.logger.info(offset)
     
     return tracks
+
+# Helper function to get the genre of albums (Spotify does not support album genres)
+def get_albums_genres():
+    file1 = open('album_genre.json')
+    album_genre_cache = json.load(file1)
+
+    songs = pd.read_csv('data.csv')
+    # TRY getting by albums
+    unique_albums = songs['album_id'].unique()  # Get unique albums
+    not_in_cache = [album for album in unique_albums if album not in album_genre_cache]  # Get albums that we dont have already
+    for albums in get_albums_chunk(not_in_cache):
+        # Make request
+        albums_ids = ','.join(map(str, albums))
+        headers = get_headers()
+        response = requests.get(API_BASE_URL + f'albums?ids={albums_ids}', headers=headers)
+        response_data = response.json()
+        for album in response_data['albums']:
+            album_genre_cache[album['id']] = album['genres']  # Update album_genre_cache
+
+    with open("album_genre.json", "w") as outfile: 
+        json.dump(album_genre_cache, outfile)
 
 # Helper function to get the genre of a songs based on the album and the artists (OLD)
 def get_track_genre(album_id, artists_id):
@@ -130,6 +137,9 @@ def get_track_atributes(items):
 
     return flat_file
 
+def get_chunk(list_, n=20):
+    for i in range(0, len(list_), n):
+        yield list_[i:i + n]
 
 
 # Home Page
@@ -142,7 +152,7 @@ def index():
 #   make a request with users credentials and get the token
 @app.route('/login')
 def login():
-    scope = 'user-read-private user-read-email user-library-read'   # Store scopes to access the API
+    scope = 'user-read-private user-read-email user-library-read playlist-modify-public playlist-modify-private'   # Store scopes to access the API
     params = {
         'client_id': CLIENT_ID,
         'response_type': 'code',
@@ -186,7 +196,8 @@ def options_menu():
     return "What would you like to do? <br>\
             <a href='/playlists'>  Get playlists</a> <br>\
             <a href='/liked-songs'> Get songs</a><br>\
-            <a href='/playlist-gender'> Get playlist for gender</a><br>"
+            <a href='/get-genre'> Get songs genre</a><br>\
+            <a href='/create-playlists'> Create playlists based on genre</a><br>"
 
 # Endpoint: Retrieve users playlists
 @app.route('/playlists')
@@ -243,8 +254,8 @@ def get_liked_songs():
     songs_data = songs_data.explode('artists_id')
     songs_data = songs_data.sort_values(['album_id', 'artists_id'])
     
-    user_id = get_user_id()
-    songs_data['id'] = user_id
+    #user_id = get_user_id()
+    #songs_data['id'] = user_id
     songs_data.to_csv('data.csv', index=False)
     #songs_data['genres'] = songs_data.apply(lambda row: get_track_genre(row['album_id'], row['artists_id']), axis=1)
     #genres = get_track_genre(album_id, artists_id)
@@ -256,18 +267,46 @@ def get_liked_songs():
     return 'success'
 
 # Endpoint: Create playlists by users songs genres
-@app.route('/playlist-gender')
-def create_playlist_by_gender():
+@app.route('/get-genre')
+def get_songs_genre():
     check_token()
     
-    songs = pd.read_csv('data.csv')
-    # TRY getting by albums
-    unique_albums = songs['album_id'].unique()
-    app.logger.info(len(unique_albums))
+    file1 = open('artist_genre.json')
+    artist_genre_cache = json.load(file1)
 
-    unique_artists = songs['artists_id'].unique()
-    app.logger.info(len(unique_artists))
-    return "ok"
+    songs = pd.read_csv('data.csv')
+    # TRY getting by artists
+    unique_artists = songs['artists_id'].unique() # Get unique artists
+    not_in_cache = [artist for artist in unique_artists if artist not in artist_genre_cache]  # Get artists that we dont have already
+    app.logger.info(len(not_in_cache))
+    for artists in get_chunk(not_in_cache, 50):
+        # Make request
+        artists_ids = ','.join(map(str, artists))
+        headers = get_headers()
+
+        response = requests.get(API_BASE_URL + f'artists?ids={artists_ids}', headers=headers)
+        response_data = response.json()
+        for artist in response_data['artists']:
+            artist_genre_cache[artist['id']] = artist['genres']  # Update artists cache
+
+    with open("artists_genre.json", "w") as outfile: 
+        json.dump(artist_genre_cache, outfile)
+
+    songs['genres'] = songs['artists_id'].apply(lambda x: artist_genre_cache.get(x))
+    songs.to_csv('data2.csv', index=False)
+    songs = songs[['track_id', 'genres']]
+    songs = songs.explode('genres')
+    songs.to_csv('songs_genre.csv', index=False)
+
+
+    return "We succesfully get your songs genre"
+
+@app.route('/create-playlists')
+def create_playlists():
+    songs_genres = pd.read_csv('songs_genre.csv')
+    songs_genres.sort_values('genres')
+    unique_genres = songs_genres['genres'].unique()
+    return unique_genres.tolist()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)

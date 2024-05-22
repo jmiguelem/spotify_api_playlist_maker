@@ -4,6 +4,7 @@ charset-normalizer==3.3.2
 click==8.1.7
 colorama==0.4.6
 Flask==3.0.3
+flask-redis==0.4.0
 greenlet==3.0.3
 idna==3.7
 itsdangerous==2.2.0
@@ -14,6 +15,7 @@ pandas==2.2.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 pytz==2024.1
+redis==5.0.4
 requests==2.31.0
 six==1.16.0
 SQLAlchemy==2.0.30
