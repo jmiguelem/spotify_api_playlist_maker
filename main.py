@@ -20,7 +20,7 @@ AUTH_URL = 'https://accounts.spotify.com/authorize'
 TOKEN_URL = 'https://accounts.spotify.com/api/token'
 API_BASE_URL = 'https://api.spotify.com/v1/'
 
-# API Functions
+# Spotify API Functions
 # Function to get the request headers(Authorization Token)
 def get_headers():
     return {
@@ -58,26 +58,6 @@ def get_all_tracks(offset, limit, params, first_time=True, total_tracks=99999999
     
     return tracks
 
-# Helper function to get the genre of albums (Spotify does not support album genres)
-def get_albums_genres():
-    file1 = open('album_genre.json')
-    album_genre_cache = json.load(file1)
-
-    songs = pd.read_csv('data.csv')
-    # TRY getting by albums
-    unique_albums = songs['album_id'].unique()  # Get unique albums
-    not_in_cache = [album for album in unique_albums if album not in album_genre_cache]  # Get albums that we dont have already
-    for albums in get_albums_chunk(not_in_cache):
-        # Make request
-        albums_ids = ','.join(map(str, albums))
-        headers = get_headers()
-        response = requests.get(API_BASE_URL + f'albums?ids={albums_ids}', headers=headers)
-        response_data = response.json()
-        for album in response_data['albums']:
-            album_genre_cache[album['id']] = album['genres']  # Update album_genre_cache
-
-    with open("album_genre.json", "w") as outfile: 
-        json.dump(album_genre_cache, outfile)
 
 # Helper function to get the genre of a songs based on the album and the artists (OLD)
 def get_track_genre(album_id, artists_id):
@@ -119,17 +99,6 @@ def get_user_id():
     id = response_data['id']
     return id
 
-def get_tracks_audio_features(tracks_ids_list):
-    headers = get_headers()
-    features = []
-    
-    for chunk in get_chunk(tracks_ids_list, n=100):
-        ids_str = ','.join(chunk)
-        response = requests.get(API_BASE_URL + 'audio-features', headers=headers, params= {'ids':ids_str})
-        response = response.json()
-        features += response['audio_features']
-    
-    return features
 
 # Logic Functions
 # Helper Function to clean the response with only the necessary columns
@@ -157,6 +126,7 @@ def get_track_atributes(items):
 def get_chunk(list_, n=20):
     for i in range(0, len(list_), n):
         yield list_[i:i + n]
+
 
 # Home Page
 @app.route('/')
@@ -264,12 +234,12 @@ def get_liked_songs():
     }
     
     #tracks_data = get_all_tracks(offset, limit, params)
-    tracks_data = get_all_tracks(offset, limit, params, first_time=False, total_tracks=100)
+    tracks_data = get_all_tracks(offset, limit, params, first_time=False, total_tracks=1)
     
     songs_data = pd.DataFrame(tracks_data)
     songs_data.to_csv('data.csv', index=False)
 
-    return 'success'
+    return f'success we recovered {len(tracks_data)} songs'
 
 # Endpoint: Create playlists by users songs genres
 @app.route('/get-genre')
@@ -312,97 +282,87 @@ def get_songs_genre():
 
 @app.route('/create-playlists')
 def create_playlists():
-    songs_genres = pd.read_csv('songs_genre.csv')
-    songs_genres.sort_values('genres')
-    unique_genres = songs_genres['genres'].unique()
-    headers = get_headers()
-    grouped = songs_genres.groupby('genres')['track_id'].apply(list)
-    genre_chunks = {
-        genre: [
-            ','.join(f'spotify%3Atrack%3A{song_id}' for song_id in song_ids[i:i+100])
-            for i in range(0, len(song_ids), 100)
-        ]
-        for genre, song_ids in grouped.items()
-    }
+    # songs_genres = pd.read_csv('songs_genre.csv')
+    # songs_genres.sort_values('genres')
+    # unique_genres = songs_genres['genres'].unique()
+    # headers = get_headers()
+    # grouped = songs_genres.groupby('genres')['track_id'].apply(list)
+    # genre_chunks = {
+    #     genre: [
+    #         ','.join(f'spotify%3Atrack%3A{song_id}' for song_id in song_ids[i:i+100])
+    #         for i in range(0, len(song_ids), 100)
+    #     ]
+    #     for genre, song_ids in grouped.items()
+    # }
 
 
-    id = get_user_id()
+    # id = get_user_id()
 
-    for genre, chunks in genre_chunks.items():
-        data = {
-            'name': f'My {genre} Playlist',
-            'description': '',
-            'public': False
-        }
+    # for genre, chunks in genre_chunks.items():
+    #     data = {
+    #         'name': f'My {genre} Playlist',
+    #         'description': '',
+    #         'public': False
+    #     }
 
-        response = requests.post(API_BASE_URL + f'users/{id}/playlists', headers=headers, json=data)
-        response_data = response.json()
-        playlist_id = response_data['id']
+    #     response = requests.post(API_BASE_URL + f'users/{id}/playlists', headers=headers, json=data)
+    #     response_data = response.json()
+    #     playlist_id = response_data['id']
 
-        for chunk_number, chunk in enumerate(chunks, start=1):
-            data = {
-                'uris': chunk,
-                'position': 0
-            }
-            response = requests.post(API_BASE_URL + f'playlists/{playlist_id}/tracks', headers, json=data)
+    #     for chunk_number, chunk in enumerate(chunks, start=1):
+    #         data = {
+    #             'uris': chunk,
+    #             'position': 0
+    #         }
+    #         response = requests.post(API_BASE_URL + f'playlists/{playlist_id}/tracks', headers, json=data)
         
-    return 'success'
-
-            
-
-
-
-
-
-
-
-    
-    return "Success"
+    return 'test'
 
 @app.route('/test')
 def test():
-    check_token()
-    offset = 0
-    limit = 50
-    params = {
-        'limit': limit,
-        'offset': offset
-    }
-    data = get_all_tracks(offset, limit, params, first_time=False, total_tracks=2)
-    ids = [track["track_id"] for track in data]
+    # check_token()
+    # offset = 0
+    # limit = 50
+    # params = {
+    #     'limit': limit,
+    #     'offset': offset
+    # }
+    # data = get_all_tracks(offset, limit, params, first_time=False, total_tracks=2)
+    # ids = [track["track_id"] for track in data]
     
-    audio_features = get_tracks_audio_features(ids)
+    # audio_features = get_tracks_audio_features(ids)
 
-    songs_data = pd.DataFrame(data)
-    songs_features = pd.DataFrame(audio_features)
+    # songs_data = pd.DataFrame(data)
+    # songs_features = pd.DataFrame(audio_features)
 
-    songs = pd.merge(songs_data, songs_features, left_on='track_id', right_on='id', how='left')
-    df_html = songs.to_html(classes='table table-striped', index=False)
+    # songs = pd.merge(songs_data, songs_features, left_on='track_id', right_on='id', how='left')
+    # df_html = songs.to_html(classes='table table-striped', index=False)
 
-    songs.to_csv('data.csv', index=False)
+    # songs.to_csv('data.csv', index=False)
     
-    # Create a simple HTML page to display the DataFrame
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>DataFrame Display</title>
-        <!-- Add Bootstrap for styling (optional) -->
-        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-    </head>
-    <body>
-        <div class="container">
-            <h1>DataFrame Display</h1>
-            {df_html}
-        </div>
-    </body>
-    </html>
-    """
+    # # Create a simple HTML page to display the DataFrame
+    # html = f"""
+    # <!DOCTYPE html>
+    # <html lang="en">
+    # <head>
+    #     <meta charset="UTF-8">
+    #     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    #     <title>DataFrame Display</title>
+    #     <!-- Add Bootstrap for styling (optional) -->
+    #     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    # </head>
+    # <body>
+    #     <div class="container">
+    #         <h1>DataFrame Display</h1>
+    #         {df_html}
+    #     </div>
+    # </body>
+    # </html>
+    # """
 
-    return html
+    # return html
     #get_tracks_audio_features(data)
+    return "test"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
