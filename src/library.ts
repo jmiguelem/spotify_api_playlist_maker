@@ -2,6 +2,7 @@ import type { SpotifyClient } from './spotify';
 import { ApiError } from './spotify';
 
 export interface Track { id: string; name: string; artistIds: string[]; artistNames: string[]; addedAt: string }
+export interface RegistryEntry { key: string; playlistId: string; name: string }
 export interface Artist { id: string; name: string; genres: string[] }
 
 /** Storage abstraction so the import logic is testable without IndexedDB. */
@@ -17,6 +18,10 @@ export interface Store {
   tagKeys(): Promise<Set<string>>;
   allTags(): Promise<Map<string, string[]>>;
   putTags(key: string, tags: string[]): Promise<void>;
+  /** Playlists this app generated (candidate key -> Spotify playlist id). Only these are ever modified. */
+  registry(): Promise<RegistryEntry[]>;
+  putRegistry(e: RegistryEntry): Promise<void>;
+  deleteRegistry(key: string): Promise<void>;
 }
 
 export class MemoryStore implements Store {
@@ -33,6 +38,10 @@ export class MemoryStore implements Store {
   async tagKeys() { return new Set(this.tags.keys()); }
   async allTags() { return new Map(this.tags); }
   async putTags(key: string, tags: string[]) { this.tags.set(key, tags); }
+  reg = new Map<string, RegistryEntry>();
+  async registry() { return [...this.reg.values()]; }
+  async putRegistry(e: RegistryEntry) { this.reg.set(e.key, e); }
+  async deleteRegistry(key: string) { this.reg.delete(key); }
 }
 
 export interface Progress { phase: 'songs' | 'artists'; done: number; total: number }
