@@ -2,7 +2,7 @@ import type { Artist, Track } from './library';
 
 export type Mode = 'broad' | 'specific' | 'both';
 
-export interface Options { mode: Mode; minSongs: number; multi: boolean }
+export interface Options { mode: Mode; minSongs: number; multi: boolean; useLastfm?: boolean }
 
 export interface Candidate {
   key: string;            // stable id, e.g. "broad:Rock" or "specific:shoegaze"
@@ -27,11 +27,11 @@ const BROAD_RULES: [string, RegExp][] = [
   ['Latin', /latin|reggaeton|salsa|bachata|cumbia|merengue|regional mexican|corrido|banda|norte|urbano|mariachi|tango|bossa|mpb|sertanejo|flamenco|trova/],
   ['R&B & Soul', /r&b|\bsoul\b|funk|motown|quiet storm|disco/],
   ['Jazz & Blues', /jazz|blues|swing|bebop/],
-  ['Classical & Soundtrack', /classical|orchestra|opera|baroque|piano|soundtrack|score|cinematic|neoclassical|choral/],
+  ['Classical & Soundtrack', /classical|orchestra|opera|baroque|piano|soundtrack|\bscore\b|cinematic|neoclassical|choral/],
   ['Folk & Country', /country|folk|bluegrass|americana|singer-songwriter|western/],
   ['Reggae & Dancehall', /reggae|dancehall|\bska\b|\bdub\b/],
-  ['Pop', /pop|idol|boy band|girl group|dance/],
-  ['World', /afro|world|celtic|arab|bollywood|indian|k-|j-|turkish|persian/],
+  ['Pop', /pop\b|\bidol\b|boy band|girl group|\bdance\b/],
+  ['World', /afro|\bworld\b|celtic|arab|bollywood|\bindian\b|\bk-|\bj-|turkish|persian/],
 ];
 
 export function broadBucket(genre: string): string {
@@ -44,15 +44,41 @@ export function titleCase(s: string): string {
   return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
+const SYNONYMS: Record<string, string> = {
+  'hip-hop': 'hip hop', hiphop: 'hip hop', rnb: 'r&b', 'r and b': 'r&b', 'rhythm and blues': 'r&b',
+  'drum n bass': 'drum and bass', 'drum & bass': 'drum and bass', dnb: 'drum and bass',
+  'electronica': 'electronic', 'synth pop': 'synthpop', 'post rock': 'post-rock', 'post punk': 'post-punk',
+  'trip hop': 'trip-hop', 'lo fi': 'lo-fi', lofi: 'lo-fi', 'alt rock': 'alternative rock',
+};
+
+/** Genres that matter but are not matched by the broad rules; accepted from Last.fm as-is. */
+const EXTRA_GENRES = new Set([
+  'trip-hop', 'industrial', 'gospel', 'new age', 'lounge', 'chillout', 'easy listening', 'experimental',
+  'noise', 'avant-garde', 'anime', 'post-rock', 'math rock', 'krautrock', 'ska punk', 'emo', 'soundtrack',
+  'world music', 'afrobeat', 'highlife', 'k-pop', 'j-pop', 'city pop', 'shoegaze', 'grunge', 'dream pop',
+]);
+
+export function normalizeTag(name: string): string {
+  const t = name.toLowerCase().trim().replace(/_/g, ' ').replace(/\s+/g, ' ');
+  return SYNONYMS[t] ?? t;
+}
+
+/** True when a Last.fm tag looks like a music genre (not "seen live", "favorites", an artist name, ...). */
+export function acceptTag(name: string, weight = 100, minWeight = 25): boolean {
+  const t = normalizeTag(name);
+  if (weight < minWeight || t.length < 3 || t.length > 30 || t.split(' ').length > 3) return false;
+  return EXTRA_GENRES.has(t) || broadBucket(t) !== OTHER;
+}
+
 function build(
   kind: 'broad' | 'specific',
   tracks: Track[],
-  genresOf: Map<string, string[]>,
+  genresOf: (t: Track) => string[],
   { minSongs, multi }: Options,
 ): Candidate[] {
   const label = (g: string) => (kind === 'broad' ? broadBucket(g) : g);
   const perTrack = tracks.map((t) => {
-    const raw = genresOf.get(t.artistIds[0] ?? '') ?? [];
+    const raw = genresOf(t);
     return { id: t.id, raw, labels: [...new Set(raw.map(label))] };
   });
   const size = new Map<string, number>();
@@ -87,8 +113,22 @@ function build(
     .sort((a, b) => b.trackIds.length - a.trackIds.length);
 }
 
-export function buildCandidates(tracks: Track[], artists: Artist[], opts: Options): Candidate[] {
-  const genresOf = new Map(artists.map((a) => [a.id, a.genres]));
+/**
+ * `trackTags` maps track id -> accepted Last.fm genre tags (already normalized);
+ * they are merged with the primary artist's Spotify genres when `opts.useLastfm` is on.
+ */
+export function buildCandidates(
+  tracks: Track[],
+  artists: Artist[],
+  opts: Options,
+  trackTags: Map<string, string[]> = new Map(),
+): Candidate[] {
+  const spotify = new Map(artists.map((a) => [a.id, a.genres.map(normalizeTag)]));
+  const genresOf = (t: Track): string[] => {
+    const base = spotify.get(t.artistIds[0] ?? '') ?? [];
+    const extra = opts.useLastfm ? trackTags.get(t.id) ?? [] : [];
+    return [...new Set([...base, ...extra])];
+  };
   const out: Candidate[] = [];
   if (opts.mode !== 'specific') out.push(...build('broad', tracks, genresOf, opts));
   if (opts.mode !== 'broad') out.push(...build('specific', tracks, genresOf, opts));

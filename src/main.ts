@@ -1,12 +1,12 @@
 import { getAccessToken, handleRedirect, isLoggedIn, logout, startLogin } from './auth';
 import { runReadChecks, runWriteCheck, type CheckResult } from './check';
-import { redirectUri } from './config';
+import { LASTFM_KEY_STORAGE, redirectUri } from './config';
 import { renderDesigner } from './designer';
 import { createClient } from './spotify';
 
 const app = document.getElementById('app')!;
 const api = createClient({ getToken: getAccessToken });
-const LASTFM_KEY = 'lastfm_key';
+const LASTFM_KEY = LASTFM_KEY_STORAGE;
 
 const style = document.createElement('style');
 style.textContent = `

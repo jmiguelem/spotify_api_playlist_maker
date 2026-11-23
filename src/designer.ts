@@ -1,5 +1,7 @@
+import { LASTFM_KEY_STORAGE } from './config';
 import { IdbStore } from './idb';
 import { buildCandidates, type Candidate, type Mode, type Options } from './genres';
+import { createLastfm, refineWithLastfm } from './lastfm';
 import { importLibrary, type Progress, type Store } from './library';
 import type { SpotifyClient } from './spotify';
 
@@ -9,9 +11,9 @@ interface Prefs extends Options { chosen: Record<string, boolean> } // key -> ex
 function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '');
-    return { mode: 'broad', minSongs: 20, multi: false, chosen: {}, ...p };
+    return { mode: 'broad', minSongs: 20, multi: false, useLastfm: true, chosen: {}, ...p };
   } catch {
-    return { mode: 'broad', minSongs: 20, multi: false, chosen: {} };
+    return { mode: 'broad', minSongs: 20, multi: false, useLastfm: true, chosen: {} };
   }
 }
 const savePrefs = (p: Prefs) => localStorage.setItem(PREFS_KEY, JSON.stringify(p));
@@ -26,6 +28,11 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     <button id="import">Import / update</button>
     <button id="full" class="secondary">Full resync</button>
     <div id="progress"><small></small></div>
+    <h2>Finer genres (Last.fm)</h2>
+    <div id="lfmstatus"><small></small></div>
+    <button id="refine" class="secondary">Refine with Last.fm</button>
+    <label class="inline"><input id="uselfm" type="checkbox"> Use Last.fm tags when designing playlists</label>
+    <div id="lfmprogress"><small></small></div>
     <h2>Design your playlists</h2>
     <div id="modes"></div>
     <label>Minimum songs per playlist: <b id="minv"></b></label>
@@ -37,6 +44,7 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
 
   let tracks: Awaited<ReturnType<Store['allTracks']>> = [];
   let artists: Awaited<ReturnType<Store['allArtists']>> = [];
+  let trackTags = new Map<string, string[]>();
 
   const isOn = (c: Candidate) => prefs.chosen[c.key] ?? !c.special;
 
@@ -44,6 +52,7 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     $('minv').textContent = String(prefs.minSongs);
     ($('min') as HTMLInputElement).value = String(prefs.minSongs);
     ($('multi') as HTMLInputElement).checked = prefs.multi;
+    ($('uselfm') as HTMLInputElement).checked = !!prefs.useLastfm;
     $('modes').innerHTML = (['broad', 'specific', 'both'] as Mode[])
       .map((m) => `<button data-mode="${m}" class="${prefs.mode === m ? '' : 'secondary'}">${{ broad: 'Broad', specific: 'Specific', both: 'Both' }[m]}</button>`)
       .join('');
@@ -52,7 +61,7 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     });
     if (tracks.length === 0) { $('list').innerHTML = '<p><small>Import your library to see playlist options.</small></p>'; $('summary').textContent = ''; return; }
 
-    const cands = buildCandidates(tracks, artists, prefs);
+    const cands = buildCandidates(tracks, artists, prefs, trackTags);
     const on = cands.filter(isOn);
     const covered = new Set(on.flatMap((c) => c.trackIds)).size;
     $('summary').textContent = `${on.length} of ${cands.length} playlists selected · covers ${covered} of ${tracks.length} songs`;
@@ -73,7 +82,11 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
   }
 
   async function reload(): Promise<void> {
-    [tracks, artists] = await Promise.all([store.allTracks(), store.allArtists()]);
+    const [t, a, tags] = await Promise.all([store.allTracks(), store.allArtists(), store.allTags()]);
+    tracks = t; artists = a;
+    trackTags = new Map([...tags].filter(([k]) => k.startsWith('t:')).map(([k, v]) => [k.slice(2), v]));
+    const tagged = [...trackTags.values()].filter((v) => v.length).length;
+    $('lfmstatus').innerHTML = `<small>${trackTags.size} of ${tracks.length} songs checked · ${tagged} got genre tags${localStorage.getItem(LASTFM_KEY_STORAGE) ? '' : ' · <span class="bad">no API key saved (API check tab)</span>'}</small>`;
     const withGenre = artists.filter((a) => a.genres.length).length;
     $('status').innerHTML = `<small>${tracks.length} songs · ${artists.length} artists looked up (${withGenre} with genres)</small>`;
     renderList();
@@ -93,6 +106,25 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     }
     btns.forEach((b) => (b.disabled = false));
     await reload();
+  };
+  $('refine').onclick = async () => {
+    const key = localStorage.getItem(LASTFM_KEY_STORAGE);
+    if (!key) { $('lfmprogress').innerHTML = '<small class="bad">Save your Last.fm API key in the API check tab first.</small>'; return; }
+    const btn = $('refine') as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      await refineWithLastfm(store, createLastfm({ apiKey: key }), (p) => {
+        $('lfmprogress').innerHTML = `<small>Fetching Last.fm tags: ${p.done} / ${p.total}</small>`;
+      });
+      $('lfmprogress').innerHTML = '<small class="ok">Last.fm refinement complete.</small>';
+    } catch (e) {
+      $('lfmprogress').innerHTML = `<small class="bad">Stopped: ${esc(String(e))}. Progress is saved; tap again to resume.</small>`;
+    }
+    btn.disabled = false;
+    await reload();
+  };
+  ($('uselfm') as HTMLInputElement).onchange = (e) => {
+    prefs.useLastfm = (e.target as HTMLInputElement).checked; savePrefs(prefs); renderList();
   };
   $('import').onclick = runImport(false);
   $('full').onclick = runImport(true);

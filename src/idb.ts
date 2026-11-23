@@ -2,10 +2,12 @@ import type { Artist, Store, Track } from './library';
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open('genre-playlists', 1);
+    const r = indexedDB.open('genre-playlists', 2);
     r.onupgradeneeded = () => {
-      r.result.createObjectStore('tracks', { keyPath: 'id' });
-      r.result.createObjectStore('artists', { keyPath: 'id' });
+      const db = r.result;
+      if (!db.objectStoreNames.contains('tracks')) db.createObjectStore('tracks', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('artists')) db.createObjectStore('artists', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('tags')) db.createObjectStore('tags', { keyPath: 'key' });
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -41,4 +43,10 @@ export class IdbStore implements Store {
   artistIds() { return this.keys('artists'); }
   allArtists() { return this.all<Artist>('artists'); }
   putArtist(a: Artist) { return this.put('artists', [a]); }
+  tagKeys() { return this.keys('tags'); }
+  async allTags() {
+    const rows = await this.all<{ key: string; tags: string[] }>('tags');
+    return new Map(rows.map((r) => [r.key, r.tags]));
+  }
+  putTags(key: string, tags: string[]) { return this.put('tags', [{ key, tags }]); }
 }

@@ -13,6 +13,10 @@ export interface Store {
   artistIds(): Promise<Set<string>>;
   allArtists(): Promise<Artist[]>;
   putArtist(a: Artist): Promise<void>;
+  /** Last.fm tag cache. Keys: `t:<trackId>` (final tags for a song) and `a:<artistId>` (artist-level cache). */
+  tagKeys(): Promise<Set<string>>;
+  allTags(): Promise<Map<string, string[]>>;
+  putTags(key: string, tags: string[]): Promise<void>;
 }
 
 export class MemoryStore implements Store {
@@ -25,6 +29,10 @@ export class MemoryStore implements Store {
   async artistIds() { return new Set(this.artists.keys()); }
   async allArtists() { return [...this.artists.values()]; }
   async putArtist(a: Artist) { this.artists.set(a.id, a); }
+  tags = new Map<string, string[]>();
+  async tagKeys() { return new Set(this.tags.keys()); }
+  async allTags() { return new Map(this.tags); }
+  async putTags(key: string, tags: string[]) { this.tags.set(key, tags); }
 }
 
 export interface Progress { phase: 'songs' | 'artists'; done: number; total: number }

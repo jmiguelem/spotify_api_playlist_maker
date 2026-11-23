@@ -20,3 +20,6 @@ export const PLAYLIST_MARKER = '[auto:genre-sync]';
 export function redirectUri(): string {
   return location.origin + import.meta.env.BASE_URL;
 }
+
+// Where the user's Last.fm API key lives (device-local, never in the repo).
+export const LASTFM_KEY_STORAGE = 'lastfm_key';
