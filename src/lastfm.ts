@@ -1,4 +1,4 @@
-import { acceptTag, normalizeTag } from './genres';
+import { acceptTag, LOOSE, looseTag, normalizeTag } from './genres';
 import type { Store } from './library';
 
 const ENDPOINT = 'https://ws.audioscrobbler.com/2.0/';
@@ -22,7 +22,7 @@ interface TagResponse {
   message?: string;
 }
 
-/** Returns accepted, normalized, de-duplicated genre tags for a track or artist. */
+/** Returns normalized, de-duplicated genre tags for a track or artist; unknown-but-plausible ones are prefixed "~". */
 export function createLastfm(deps: LastfmDeps) {
   const f = deps.fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -51,13 +51,17 @@ export function createLastfm(deps: LastfmDeps) {
       const raw = j.toptags?.tag;
       const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
       const out: string[] = [];
+      const loose: string[] = [];
       for (const t of list) {
-        if (!acceptTag(t.name, Number(t.count))) continue;
         const n = normalizeTag(t.name);
-        if (!out.includes(n)) out.push(n);
-        if (out.length >= 5) break;
+        if (acceptTag(t.name, Number(t.count))) {
+          if (!out.includes(n) && out.length < 5) out.push(n);
+        } else if (looseTag(t.name, Number(t.count), params.artist ?? '')) {
+          // Unknown tag (e.g. "hypnagogic pop"): marked "~" so it only counts when several artists share it.
+          if (!loose.includes(LOOSE + n) && loose.length < 3) loose.push(LOOSE + n);
+        }
       }
-      return out;
+      return [...out, ...loose];
     }
   }
 
@@ -101,7 +105,7 @@ export async function refineWithLastfm(
           await store.putTags(key, at);
           artistCache.set(artistId, at);
         }
-        tags = [...new Set([...tags, ...at])].slice(0, 5);
+        tags = [...new Set([...tags, ...at])].slice(0, 8);
       }
     }
     await store.putTags(`t:${t.id}`, tags);
