@@ -102,7 +102,12 @@ export async function runWriteCheck(api: SpotifyClient): Promise<CheckResult[]> 
 
   out.push(await probe('DELETE /me/library (remove test playlist)', async () => {
     if (!playlistId) throw new Error('no test playlist');
-    await api.del('/me/library', { uris: [`spotify:playlist:${playlistId}`] });
+    // Spotify takes `uris` as a comma-separated query parameter here, not a JSON body.
+    try {
+      await api.del(`/me/library?uris=${encodeURIComponent(`spotify:playlist:${playlistId}`)}`);
+    } catch (e) {
+      throw new Error(`${e instanceof Error ? e.message : e} — delete the playlist "API check (safe to delete)" manually in Spotify`);
+    }
     return 'test playlist removed';
   }));
 
