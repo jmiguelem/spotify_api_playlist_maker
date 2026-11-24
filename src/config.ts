@@ -13,6 +13,9 @@ export const API_BASE = 'https://api.spotify.com/v1';
 export const AUTH_URL = 'https://accounts.spotify.com/authorize';
 export const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 
+// Prefix of every generated playlist name, so they are easy to tell apart from your own.
+export const PLAYLIST_PREFIX = '🤖 ';
+
 // Marker written into the description of every playlist this app creates.
 export const PLAYLIST_MARKER = '[auto:genre-sync]';
 

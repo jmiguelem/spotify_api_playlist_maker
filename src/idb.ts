@@ -1,13 +1,14 @@
-import type { Artist, Store, Track } from './library';
+import type { Artist, RegistryEntry, Store, Track } from './library';
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open('genre-playlists', 2);
+    const r = indexedDB.open('genre-playlists', 3);
     r.onupgradeneeded = () => {
       const db = r.result;
       if (!db.objectStoreNames.contains('tracks')) db.createObjectStore('tracks', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('artists')) db.createObjectStore('artists', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('tags')) db.createObjectStore('tags', { keyPath: 'key' });
+      if (!db.objectStoreNames.contains('registry')) db.createObjectStore('registry', { keyPath: 'key' });
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -49,4 +50,11 @@ export class IdbStore implements Store {
     return new Map(rows.map((r) => [r.key, r.tags]));
   }
   putTags(key: string, tags: string[]) { return this.put('tags', [{ key, tags }]); }
+  registry() { return this.all<RegistryEntry>('registry'); }
+  putRegistry(e: RegistryEntry) { return this.put('registry', [e]); }
+  async deleteRegistry(key: string) {
+    const tx = (await this.db).transaction('registry', 'readwrite');
+    tx.objectStore('registry').delete(key);
+    await done(tx);
+  }
 }
