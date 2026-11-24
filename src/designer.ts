@@ -1,6 +1,7 @@
 import { LASTFM_KEY_STORAGE } from './config';
 import { IdbStore } from './idb';
 import { buildCandidates, type Candidate, type Mode, type Options } from './genres';
+import { exportBackup, importBackup } from './backup';
 import { createLastfm, refineWithLastfm } from './lastfm';
 import { importLibrary, type Progress, type Store } from './library';
 import type { SpotifyClient } from './spotify';
@@ -28,6 +29,12 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     <button id="import">Import / update</button>
     <button id="full" class="secondary">Full resync</button>
     <div id="progress"><small></small></div>
+    <h2>Saved data</h2>
+    <div id="saved"><small></small></div>
+    <button id="export" class="secondary">Export backup</button>
+    <button id="importbtn" class="secondary">Import backup</button>
+    <input id="importfile" type="file" accept=".json,application/json" hidden>
+    <div id="backupmsg"><small></small></div>
     <h2>Finer genres (Last.fm)</h2>
     <div id="lfmstatus"><small></small></div>
     <button id="refine" class="secondary">Refine with Last.fm</button>
@@ -87,6 +94,9 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     trackTags = new Map([...tags].filter(([k]) => k.startsWith('t:')).map(([k, v]) => [k.slice(2), v]));
     const tagged = [...trackTags.values()].filter((v) => v.length).length;
     $('lfmstatus').innerHTML = `<small>${trackTags.size} of ${tracks.length} songs checked · ${tagged} got genre tags${localStorage.getItem(LASTFM_KEY_STORAGE) ? '' : ' · <span class="bad">no API key saved (API check tab)</span>'}</small>`;
+    let protectedStore = false;
+    try { protectedStore = (await navigator.storage?.persist?.()) ?? false; } catch { /* unsupported */ }
+    $('saved').innerHTML = `<small>${tracks.length} songs · ${artists.length} artists with genres · ${tags.size} Last.fm lookups, kept on this device ${protectedStore ? '(protected from automatic clean-up)' : '(the browser may clear it if unused for a while: export a backup)'}</small>`;
     const withGenre = artists.filter((a) => a.genres.length).length;
     $('status').innerHTML = `<small>${tracks.length} songs · ${artists.length} artists looked up (${withGenre} with genres)</small>`;
     renderList();
@@ -122,6 +132,29 @@ export function renderDesigner(root: HTMLElement, api: SpotifyClient, store: Sto
     }
     btn.disabled = false;
     await reload();
+  };
+  $('export').onclick = async () => {
+    const blob = new Blob([JSON.stringify(await exportBackup(store))], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `genre-playlists-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $('backupmsg').innerHTML = '<small class="ok">Backup downloaded.</small>';
+  };
+  $('importbtn').onclick = () => ($('importfile') as HTMLInputElement).click();
+  ($('importfile') as HTMLInputElement).onchange = async (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const n = await importBackup(store, JSON.parse(await file.text()));
+      $('backupmsg').innerHTML = `<small class="ok">Restored ${n.tracks} songs, ${n.artists} artists, ${n.tags} tag lookups.</small>`;
+      await reload();
+    } catch (err) {
+      $('backupmsg').innerHTML = `<small class="bad">Could not import: ${esc(String(err))}</small>`;
+    }
+    input.value = '';
   };
   ($('uselfm') as HTMLInputElement).onchange = (e) => {
     prefs.useLastfm = (e.target as HTMLInputElement).checked; savePrefs(prefs); renderList();
